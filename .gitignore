@@ -1,0 +1,7 @@
+.venv/
+pycache/
+*.pyc
+backend/pretrained_models/
+backend/temp_audio/
+backend/data/
+backend/figures/

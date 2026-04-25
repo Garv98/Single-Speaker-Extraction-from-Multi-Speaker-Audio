@@ -1,0 +1,11 @@
+torch
+torchaudio
+fastapi
+uvicorn[standard]
+librosa
+soundfile
+speechbrain
+pandas
+matplotlib
+numpy
+python-multipart
