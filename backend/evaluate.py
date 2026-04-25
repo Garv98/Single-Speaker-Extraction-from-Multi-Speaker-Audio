@@ -105,10 +105,14 @@ def generate_publication_graphs():
     mix_16k = torchaudio.transforms.Resample(8000, 16000)(mix_tensor)
 
     model_config = {
-        "n_fft": 256,
-        "in_channels": 16,
-        "n_layers": 2,
+        "n_fft": 512,
+        "hop_length": 128,
+        "d_model": 64,
+        "n_heads": 4,
+        "lstm_hidden": 256,
+        "n_layers": 6,
         "num_sources": 2,
+        "dropout": 0.0,
     }
     checkpoint_path = "best_tfgridnet.pth"
     if os.path.exists(checkpoint_path):
@@ -116,19 +120,17 @@ def generate_publication_graphs():
         if isinstance(checkpoint, dict) and isinstance(checkpoint.get("config"), dict):
             for key in model_config:
                 if key in checkpoint["config"]:
-                    model_config[key] = int(checkpoint["config"][key])
+                    model_config[key] = checkpoint["config"][key]
 
     gridnet = TFGridNet(**model_config)
 
     if os.path.exists(checkpoint_path):
-        checkpoint = torch.load(checkpoint_path, map_location="cpu")
-        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-            checkpoint = checkpoint["model_state_dict"]
-        if isinstance(checkpoint, dict):
-            if any(k.startswith("module.") for k in checkpoint.keys()):
-                checkpoint = {k.replace("module.", "", 1): v for k, v in checkpoint.items()}
-            gridnet.load_state_dict(checkpoint, strict=False)
-            print(f"    Loaded trained checkpoint: {checkpoint_path}")
+        raw = torch.load(checkpoint_path, map_location="cpu")
+        state = raw["model_state_dict"] if isinstance(raw, dict) and "model_state_dict" in raw else raw
+        if any(k.startswith("module.") for k in state.keys()):
+            state = {k.replace("module.", "", 1): v for k, v in state.items()}
+        gridnet.load_state_dict(state, strict=False)
+        print(f"    Loaded trained checkpoint: {checkpoint_path}")
     else:
         print("    [WARN] No best_tfgridnet.pth found. Using randomly initialized model.")
 

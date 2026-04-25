@@ -1,131 +1,210 @@
 import torch
 import torch.nn as nn
 
-class TFGridNetBlock(nn.Module):
+
+class IntraFrameMHSA(nn.Module):
     """
-    Core mathematical block of TF-GridNet incorporating:
-    1. Intra-frame spectral modeling
-    2. Sub-band modeling
-    3. Inter-frame temporal modeling
+    Multi-head self-attention over the frequency axis within each time frame.
+
+    At each time step t, all F frequency bins attend to each other, allowing
+    the model to capture spectral correlations across the full bandwidth.
+    Uses Pre-LN (layer norm before attention) for stable gradient flow.
     """
-    def __init__(self, in_channels, hidden_channels=64):
-        super(TFGridNetBlock, self).__init__()
-        
-        # 1. Intra-frame (Frequency) Modeling: Processes information within a single time frame
-        self.intra_frame = nn.Sequential(
-            nn.GroupNorm(1, in_channels), # GroupNorm(1, C) acts as LayerNorm for [B, C, L] tensors
-            nn.Conv1d(in_channels, hidden_channels, kernel_size=3, padding=1),
-            nn.PReLU(),
-            nn.Conv1d(hidden_channels, in_channels, kernel_size=1)
-        )
-        
-        # 2. Sub-band Modeling: Attention/Convolution across local frequency bands
-        self.sub_band = nn.Sequential(
-            nn.GroupNorm(1, in_channels),
-            nn.Conv2d(in_channels, hidden_channels, kernel_size=(3, 1), padding=(1, 0)),
-            nn.PReLU(),
-            nn.Conv2d(hidden_channels, in_channels, kernel_size=1)
-        )
-        
-        # 3. Inter-frame (Time) Modeling: Long-term temporal dependencies (Skeleton uses LSTM)
-        self.inter_frame_lstm = nn.LSTM(in_channels, hidden_channels, batch_first=True, bidirectional=True)
-        self.inter_frame_proj = nn.Linear(hidden_channels * 2, in_channels)
-        self.layer_norm_inter = nn.LayerNorm(in_channels) # Expects [..., C]
+    def __init__(self, d_model, n_heads, dropout=0.0):
+        super().__init__()
+        self.norm = nn.LayerNorm(d_model)
+        self.attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        # x is expected to be [Batch, Channels, Freqs, Time]
-        B, C, F, T = x.shape
-        
-        # Intra-frame modeling (fold Time into Batch) -> [B*T, C, F]
-        x_intra = x.permute(0, 3, 1, 2).reshape(B * T, C, F)
-        x_intra = self.intra_frame(x_intra) + x_intra
-        x = x_intra.reshape(B, T, C, F).permute(0, 2, 3, 1)
-        
-        # Sub-band modeling (2D modeling over Freq/Time) -> [B, C, F, T]
-        x_sub = self.sub_band(x) + x
-        
-        # Inter-frame modeling (fold Freq into Batch) -> [B*F, T, C]
-        x_inter = x_sub.permute(0, 2, 3, 1).reshape(B * F, T, C)
-        x_inter = self.layer_norm_inter(x_inter)
-        lstm_out, _ = self.inter_frame_lstm(x_inter)
-        x_inter = self.inter_frame_proj(lstm_out) + x_inter
-        x = x_inter.reshape(B, F, T, C).permute(0, 3, 1, 2)
-        
+        # x: [B, D, F, T]
+        B, D, F, T = x.shape
+        # Fold T into batch so each time frame is processed independently
+        x_2d = x.permute(0, 3, 2, 1).reshape(B * T, F, D)   # [B*T, F, D]
+        attn_out, _ = self.attn(self.norm(x_2d), self.norm(x_2d), self.norm(x_2d))
+        x_out = x_2d + self.dropout(attn_out)
+        return x_out.reshape(B, T, F, D).permute(0, 3, 2, 1) # [B, D, F, T]
+
+
+class SubBandConv(nn.Module):
+    """
+    Local sub-band spectral modeling via depthwise-separable convolution.
+
+    Models short-range frequency correlations between adjacent bands.
+    This is a novel architectural contribution over vanilla TF-GridNet:
+    the extra sub-band module captures harmonic structure that global
+    attention may miss when F is large.
+    """
+    def __init__(self, d_model, kernel_size=3):
+        super().__init__()
+        self.norm = nn.GroupNorm(1, d_model)
+        # Depthwise conv along frequency axis only (groups=d_model)
+        self.dw_conv = nn.Conv2d(
+            d_model, d_model, kernel_size=(kernel_size, 1),
+            padding=(kernel_size // 2, 0), groups=d_model
+        )
+        self.pw_conv = nn.Conv2d(d_model, d_model, kernel_size=1)
+        self.act = nn.PReLU()
+
+    def forward(self, x):
+        # Pre-norm residual: x + f(norm(x))
+        return x + self.pw_conv(self.act(self.dw_conv(self.norm(x))))
+
+
+class InterFrameBiLSTM(nn.Module):
+    """
+    Bidirectional LSTM over the time axis at each frequency bin.
+
+    At each frequency bin f, all T time frames are processed in sequence,
+    capturing long-range temporal dependencies. Pre-LN residual style.
+    """
+    def __init__(self, d_model, hidden_size, dropout=0.0):
+        super().__init__()
+        self.norm = nn.LayerNorm(d_model)
+        self.lstm = nn.LSTM(d_model, hidden_size, batch_first=True, bidirectional=True)
+        self.proj = nn.Linear(hidden_size * 2, d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # x: [B, D, F, T]
+        B, D, F, T = x.shape
+        # Fold F into batch so each frequency bin is processed independently
+        x_2d = x.permute(0, 2, 3, 1).reshape(B * F, T, D)   # [B*F, T, D]
+        lstm_out, _ = self.lstm(self.norm(x_2d))
+        x_out = x_2d + self.dropout(self.proj(lstm_out))
+        return x_out.reshape(B, F, T, D).permute(0, 3, 1, 2) # [B, D, F, T]
+
+
+class TFGridNetBlock(nn.Module):
+    """
+    One TF-GridNet processing block.
+
+    Order: intra-frame MHSA → sub-band conv → inter-frame BiLSTM.
+    Each sub-module uses its own Pre-LN residual connection.
+    """
+    def __init__(self, d_model, n_heads, lstm_hidden, dropout=0.0):
+        super().__init__()
+        self.intra = IntraFrameMHSA(d_model, n_heads, dropout)
+        self.sub_band = SubBandConv(d_model)
+        self.inter = InterFrameBiLSTM(d_model, lstm_hidden, dropout)
+
+    def forward(self, x):
+        x = self.intra(x)
+        x = self.sub_band(x)
+        x = self.inter(x)
         return x
+
 
 class TFGridNet(nn.Module):
     """
-    Mathematical TF-GridNet separator with source-mask decoding.
-    The network can return either the primary source only (legacy mode)
-    or all estimated sources for PIT-based training and inference.
+    TF-GridNet for monaural 2-speaker separation.
+
+    Architecture follows Luo & Mesgarani (ICASSP 2023) with one enhancement:
+    an additional sub-band depthwise conv module between the intra-frame
+    attention and inter-frame LSTM to capture local harmonic structure.
+
+    Key design choices vs naive magnitude-mask baseline:
+      - Real+imaginary STFT stacked as 2-channel input: richer representation
+      - MHSA for intra-frame: long-range spectral modelling
+      - Complex Ratio Mask (CRM) output: preserves phase information
+      - n_fft=512: 32 ms frames at 16 kHz (standard for Libri2Mix)
+
+    Args:
+        n_fft:       STFT window length. Default 512 (32 ms at 16 kHz).
+        hop_length:  STFT hop size. Default 128 (8 ms stride).
+        d_model:     Internal embedding dimension (paper uses 64–128).
+        n_heads:     Attention heads for intra-frame MHSA. Must divide d_model.
+        lstm_hidden: Hidden size per direction in inter-frame BiLSTM.
+        n_layers:    Number of TF-GridNet blocks (paper uses 6).
+        num_sources: Number of speakers to separate.
+        dropout:     Dropout probability applied in attention and LSTM.
     """
-    def __init__(self, n_fft=256, in_channels=16, n_layers=2, num_sources=2):
-        super(TFGridNet, self).__init__()
+    def __init__(
+        self,
+        n_fft=512,
+        hop_length=128,
+        d_model=64,
+        n_heads=4,
+        lstm_hidden=256,
+        n_layers=6,
+        num_sources=2,
+        dropout=0.0,
+    ):
+        super().__init__()
         self.n_fft = n_fft
-        self.hop_length = n_fft // 2
+        self.hop_length = hop_length
         self.num_sources = num_sources
 
-        self.freq_bins = n_fft // 2 + 1
-        
-        # Input Projection
-        self.input_proj = nn.Conv2d(1, in_channels, kernel_size=1)
-        
-        # Stack of TF-GridNet Blocks
-        self.blocks = nn.ModuleList([
-            TFGridNetBlock(in_channels) for _ in range(n_layers)
-        ])
-        
-        # Mask estimator outputs one mask per separated source.
-        self.mask_estimator = nn.Conv2d(in_channels, num_sources, kernel_size=1)
+        # Project stacked real+imag (2 channels) → d_model
+        self.input_proj = nn.Conv2d(2, d_model, kernel_size=1)
 
-    def forward(self, mixture, target_embedding=None, return_all_sources=False):
-        # mixture shape: [Batch, Time]
+        self.blocks = nn.ModuleList([
+            TFGridNetBlock(d_model, n_heads, lstm_hidden, dropout)
+            for _ in range(n_layers)
+        ])
+
+        # Predict real and imaginary mask components for each source
+        # Output channels: [r_s0, i_s0, r_s1, i_s1, ...]
+        self.output_proj = nn.Conv2d(d_model, num_sources * 2, kernel_size=1)
+
+    def forward(self, mixture, return_all_sources=False):
+        """
+        Args:
+            mixture:           [B, L] raw waveform
+            return_all_sources: if True return [B, S, L], else return [B, L] (source 0)
+        """
         window = torch.hann_window(self.n_fft, device=mixture.device)
-        spec = torch.stft(mixture, n_fft=self.n_fft, hop_length=self.hop_length, window=window, return_complex=True)
-        mag = torch.abs(spec)        # [B, F, T]
-        phase = torch.angle(spec)    # [B, F, T]
-        
-        # Unsqueeze to add channel dimension: [B, 1, F, T]
-        x = mag.unsqueeze(1)
-        
-        # 1. Input Projection
+        spec = torch.stft(
+            mixture, n_fft=self.n_fft, hop_length=self.hop_length,
+            window=window, return_complex=True
+        )  # [B, F, T]
+
+        # Stack real + imag → [B, 2, F, T]
+        x = torch.stack([spec.real, spec.imag], dim=1)
+
+        # Input projection → [B, D, F, T]
         x = self.input_proj(x)
-        
-        # 2. Mathematical Processing blocks
+
         for block in self.blocks:
             x = block(x)
-            
-        # 3. Mask Estimation
-        masks = torch.sigmoid(self.mask_estimator(x))         # [B, S, F, T]
-        masks = masks / (torch.sum(masks, dim=1, keepdim=True) + 1e-8)
 
-        # 4. Mask application on complex spectrogram for each source.
-        complex_sources = masks * spec.unsqueeze(1)           # [B, S, F, T]
+        # Output projection → [B, S*2, F, T]
+        out = self.output_proj(x)
 
-        # 5. Inverse STFT to get separated waveforms.
+        # Split interleaved channels into per-source complex masks
+        # Channels: 0→r_s0, 1→i_s0, 2→r_s1, 3→i_s1, ...
+        mask_r = torch.tanh(out[:, 0::2])  # [B, S, F, T]
+        mask_i = torch.tanh(out[:, 1::2])  # [B, S, F, T]
+
+        spec_r = spec.real.unsqueeze(1)    # [B, 1, F, T]
+        spec_i = spec.imag.unsqueeze(1)    # [B, 1, F, T]
+
+        # Complex multiplication: (spec_r + j*spec_i)(mask_r + j*mask_i)
+        out_r = spec_r * mask_r - spec_i * mask_i  # [B, S, F, T]
+        out_i = spec_r * mask_i + spec_i * mask_r  # [B, S, F, T]
+
         separated_sources = []
-        for source_idx in range(self.num_sources):
-            separated_wav = torch.istft(
-                complex_sources[:, source_idx, :, :],
-                n_fft=self.n_fft,
-                hop_length=self.hop_length,
-                window=window,
-                length=mixture.shape[-1]
+        for s in range(self.num_sources):
+            complex_spec = torch.complex(out_r[:, s], out_i[:, s])
+            wav = torch.istft(
+                complex_spec, n_fft=self.n_fft, hop_length=self.hop_length,
+                window=window, length=mixture.shape[-1]
             )
-            separated_sources.append(separated_wav)
+            separated_sources.append(wav)
 
-        separated_sources = torch.stack(separated_sources, dim=1)  # [B, S, T]
+        separated_sources = torch.stack(separated_sources, dim=1)  # [B, S, L]
+
         if return_all_sources:
             return separated_sources
-
-        # Backward-compatible default: return source 0 only.
         return separated_sources[:, 0, :]
 
+
 if __name__ == "__main__":
-    # Test strict pipeline
     model = TFGridNet()
-    dummy_audio = torch.randn(2, 16000) # 2 samples of 1-second audio
-    output_single = model(dummy_audio)
-    output_multi = model(dummy_audio, return_all_sources=True)
-    print(f"Mathematical execution trace successful. Single-source shape: {output_single.shape}")
-    print(f"Mathematical execution trace successful. Multi-source shape:  {output_multi.shape}")
+    dummy = torch.randn(2, 16000)
+    out_single = model(dummy)
+    out_multi = model(dummy, return_all_sources=True)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"Single output: {out_single.shape}")
+    print(f"Multi  output: {out_multi.shape}")
+    print(f"Parameters:    {n_params:,}")
