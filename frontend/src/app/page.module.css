@@ -1,0 +1,322 @@
+.main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 100vh;
+  padding: 3rem 2rem;
+  max-width: 1280px;
+  margin: 0 auto;
+  animation: fadeInUp 0.6s ease-out;
+}
+
+/* ─── Header ─── */
+.header {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.title {
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent-secondary) 50%, var(--accent-primary) 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 0.75rem;
+  line-height: 1.1;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-secondary);
+  font-weight: 400;
+  max-width: 550px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.headerBadge {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+/* ─── Workspace Grid ─── */
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+/* ─── Panel ─── */
+.panel {
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.panelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--glass-border);
+  padding-bottom: 0.75rem;
+}
+
+.panelTitle {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panelIcon {
+  font-size: 1.2rem;
+}
+
+/* ─── Upload Zone ─── */
+.uploadZone {
+  border: 2px dashed var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 2.5rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: hsla(225, 45%, 8%, 0.5);
+  position: relative;
+  overflow: hidden;
+}
+
+.uploadZone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, hsla(262, 83%, 50%, 0.03), hsla(316, 73%, 50%, 0.03));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.uploadZone:hover {
+  border-color: var(--accent-primary);
+  background: hsla(225, 45%, 10%, 0.7);
+}
+
+.uploadZone:hover::before {
+  opacity: 1;
+}
+
+.uploadIcon {
+  font-size: 2.5rem;
+  margin-bottom: 0.75rem;
+  display: block;
+}
+
+.fileName {
+  color: var(--accent-secondary);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.uploadHint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.4rem;
+}
+
+/* ─── Controls ─── */
+.controlGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.controlLabel {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 600;
+}
+
+.selectControl {
+  width: 100%;
+  background: hsla(225, 45%, 8%, 0.8);
+  color: var(--text-primary);
+  border: 1px solid hsla(225, 40%, 20%, 0.5);
+  border-radius: var(--radius-sm);
+  padding: 0.7rem 0.8rem;
+  font-size: 0.92rem;
+  font-family: 'Inter', sans-serif;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.selectControl:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px hsla(262, 83%, 58%, 0.2);
+}
+
+.controlHint {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+/* ─── Visualizer ─── */
+.visualizerPlaceholder {
+  height: 160px;
+  width: 100%;
+  background: linear-gradient(180deg, transparent, hsla(262, 83%, 50%, 0.06));
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  letter-spacing: 3px;
+  border: 1px solid hsla(225, 40%, 20%, 0.3);
+}
+
+.waveformBars {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 20px 20px;
+}
+
+.waveBar {
+  width: 3px;
+  background: var(--accent-primary);
+  border-radius: 2px;
+  opacity: 0.25;
+  transition: height 0.3s ease;
+}
+
+.waveBar.active {
+  opacity: 0.7;
+  animation: waveform 0.8s ease-in-out infinite;
+  background: linear-gradient(to top, var(--accent-primary), var(--accent-secondary));
+}
+
+.waveLine {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent-primary);
+  opacity: 0.15;
+  box-shadow: 0 0 10px var(--accent-primary);
+}
+
+.statusText {
+  z-index: 10;
+  text-transform: uppercase;
+}
+
+/* ─── Audio Player ─── */
+.audioResult {
+  margin-top: 0.5rem;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: fadeInUp 0.4s ease-out;
+}
+
+.audioLabel {
+  font-size: 0.85rem;
+  color: var(--accent-success);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audioPlayer {
+  width: 100%;
+  outline: none;
+  border-radius: var(--radius-sm);
+}
+
+.outputMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  gap: 0.75rem;
+}
+
+/* ─── Metrics Section ─── */
+.metricsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.metricCard {
+  padding: 0.85rem;
+  background: hsla(225, 45%, 8%, 0.6);
+  border-radius: var(--radius-md);
+  border: 1px solid hsla(225, 40%, 18%, 0.3);
+}
+
+.metricLabel {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+
+.metricValue {
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: 'Outfit', sans-serif;
+}
+
+.metricValue.accent {
+  color: var(--accent-primary);
+}
+
+.metricValue.secondary {
+  color: var(--accent-secondary);
+}
+
+.metricValue.success {
+  color: var(--accent-success);
+}
+
+/* ─── Error ─── */
+.error {
+  color: hsl(0, 80%, 60%);
+  font-size: 0.85rem;
+  padding: 0.75rem;
+  background: hsla(0, 80%, 50%, 0.1);
+  border-radius: var(--radius-sm);
+  border: 1px solid hsla(0, 80%, 50%, 0.2);
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 800px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .metricsGrid {
+    grid-template-columns: 1fr;
+  }
+}

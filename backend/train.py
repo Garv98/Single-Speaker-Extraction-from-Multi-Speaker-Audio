@@ -39,19 +39,22 @@ TRAIN_CONFIG = dict(
     learning_rate=1e-3,
     epochs=80,
     batch_size=4,       # Reduce to 2 if VRAM is tight
-    stft_weight=0.3,
+    stft_weight=0.15,
+    stft_warmup_epochs=8,
     warmup_epochs=5,
     early_stop_patience=12,
     min_delta=1e-3,
     chunk_duration=3.0,
     num_workers=4,      # Set to 0 on Windows; 4 works well in Colab
     grad_clip=5.0,
+    ema_decay=0.999,
 )
 
 CSV_FIELDS = [
     "epoch", "train_loss", "train_pit", "train_stft",
     "val_loss", "val_pit", "val_stft",
-    "lr", "best_val_loss", "is_best", "no_improve_epochs", "epoch_seconds",
+    "lr", "stft_weight_epoch", "best_val_loss", "best_val_pit",
+    "is_best", "no_improve_epochs", "epoch_seconds",
 ]
 
 
@@ -129,24 +132,57 @@ def pit_si_sdr_loss(estimated_sources, reference_sources):
     return -torch.mean(best)
 
 
-def multi_resolution_stft_loss(estimated_sources, reference_sources,
-                                fft_sizes=(256, 512, 1024), eps=1e-8):
+def multi_resolution_stft_loss(
+    estimated_sources,
+    reference_sources,
+    fft_sizes=(256, 512, 1024),
+    eps=1e-8,
+    max_sc=10.0,
+    max_lm=10.0,
+):
     """Multi-resolution STFT loss for perceptual spectral quality."""
     est = estimated_sources.reshape(-1, estimated_sources.shape[-1])
     ref = reference_sources.reshape(-1, reference_sources.shape[-1])
-    total = 0.0
+    total = est.new_tensor(0.0)
     for n_fft in fft_sizes:
         hop    = n_fft // 4
         window = torch.hann_window(n_fft, device=est.device)
         kw     = dict(n_fft=n_fft, hop_length=hop, window=window, return_complex=True)
-        est_spec = torch.stft(est, **kw).abs()
-        ref_spec = torch.stft(ref, **kw).abs()
-        sc  = torch.linalg.norm(ref_spec - est_spec, dim=(-2, -1)) / (
-              torch.linalg.norm(ref_spec, dim=(-2, -1)) + eps)
-        lm  = torch.mean(torch.abs(torch.log(ref_spec + eps) - torch.log(est_spec + eps)),
-                         dim=(-2, -1))
+        est_spec = torch.stft(est, **kw).abs().clamp_min(eps)
+        ref_spec = torch.stft(ref, **kw).abs().clamp_min(eps)
+
+        # Clamp extreme spectral terms to avoid occasional validation blowups.
+        sc_num = torch.linalg.norm(ref_spec - est_spec, dim=(-2, -1))
+        sc_den = torch.linalg.norm(ref_spec, dim=(-2, -1)).clamp_min(1e-4)
+        sc = (sc_num / sc_den).clamp(max=max_sc)
+
+        lm = torch.mean(
+            torch.abs(torch.log(ref_spec) - torch.log(est_spec)),
+            dim=(-2, -1),
+        ).clamp(max=max_lm)
         total += torch.mean(sc + lm)
     return total / len(fft_sizes)
+
+
+def compute_epoch_stft_weight(epoch_idx: int, target_weight: float, warmup_epochs: int) -> float:
+    if warmup_epochs <= 0:
+        return float(target_weight)
+    progress = min(1.0, float(epoch_idx + 1) / float(warmup_epochs))
+    return float(target_weight) * progress
+
+
+@torch.no_grad()
+def update_ema_model(ema_model: torch.nn.Module, model: torch.nn.Module, decay: float):
+    ema_params = dict(ema_model.named_parameters())
+    model_params = dict(model.named_parameters())
+    for name, param in model_params.items():
+        ema_params[name].mul_(decay).add_(param.data, alpha=1.0 - decay)
+
+    # Keep running buffers in sync (e.g., if future blocks add norm buffers).
+    ema_buffers = dict(ema_model.named_buffers())
+    model_buffers = dict(model.named_buffers())
+    for name, buffer in model_buffers.items():
+        ema_buffers[name].copy_(buffer)
 
 
 # ── Evaluation ─────────────────────────────────────────────────────────────────
@@ -196,6 +232,17 @@ def train():
     patience  = TRAIN_CONFIG["early_stop_patience"]
     min_delta = TRAIN_CONFIG["min_delta"]
     nw        = TRAIN_CONFIG["num_workers"]
+    ema_decay = float(TRAIN_CONFIG.get("ema_decay", 0.0))
+    use_ema   = 0.0 < ema_decay < 1.0
+
+    ema_model = None
+    if use_ema:
+        ema_model = TFGridNet(**MODEL_CONFIG).to(device)
+        ema_model.load_state_dict(model.state_dict())
+        ema_model.eval()
+        for param in ema_model.parameters():
+            param.requires_grad_(False)
+        print(f"EMA enabled (decay={ema_decay:.4f})")
 
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
 
@@ -253,19 +300,35 @@ def train():
     # ── Resume from last checkpoint if present ───────────────────────────────
     start_epoch       = 0
     best_val_loss     = float("inf")
+    best_val_pit      = float("inf")
     no_improve_epochs = 0
 
     if Path(LAST_CKPT).exists():
         print(f"[RESUME] Loading checkpoint from {LAST_CKPT}")
         ckpt = torch.load(LAST_CKPT, map_location=device)
-        model.load_state_dict(ckpt["model_state_dict"])
+        student_state = ckpt.get("student_model_state_dict")
+        if isinstance(student_state, dict):
+            model.load_state_dict(student_state)
+        else:
+            model.load_state_dict(ckpt["model_state_dict"])
+
+        if use_ema and ema_model is not None:
+            if isinstance(ckpt.get("model_state_dict"), dict):
+                ema_model.load_state_dict(ckpt["model_state_dict"])
+            else:
+                ema_model.load_state_dict(model.state_dict())
+
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         scaler.load_state_dict(ckpt["scaler_state_dict"])
         start_epoch       = ckpt["epoch"]
-        best_val_loss     = ckpt["best_val_loss"]
+        best_val_loss     = ckpt.get("best_val_loss", float("inf"))
+        best_val_pit      = ckpt.get("best_val_pit", best_val_loss)
         no_improve_epochs = ckpt["no_improve_epochs"]
-        print(f"[RESUME] Resuming from epoch {start_epoch + 1} | Best val loss: {best_val_loss:.4f}")
+        print(
+            f"[RESUME] Resuming from epoch {start_epoch + 1} | "
+            f"Best val loss: {best_val_loss:.4f} | Best val PIT: {best_val_pit:.4f}"
+        )
 
     initialize_csv_logger(CSV_LOG_PATH)
     history = {k: [] for k in ["epoch", "train_loss", "train_pit", "train_stft",
@@ -279,6 +342,11 @@ def train():
         epoch_start = time.time()
         model.train()
         running_loss = running_pit = running_stft = 0.0
+        epoch_stft_w = compute_epoch_stft_weight(
+            epoch,
+            stft_w,
+            int(TRAIN_CONFIG.get("stft_warmup_epochs", 0)),
+        )
 
         for batch_idx, batch in enumerate(train_loader):
             mixture = batch["mixture"].to(device, non_blocking=True)
@@ -290,13 +358,16 @@ def train():
                 estimated = model(mixture, return_all_sources=True)
                 pit_loss  = pit_si_sdr_loss(estimated, targets)
                 stft_loss = multi_resolution_stft_loss(estimated, targets)
-                loss      = pit_loss + stft_w * stft_loss
+                loss      = pit_loss + epoch_stft_w * stft_loss
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), TRAIN_CONFIG["grad_clip"])
             scaler.step(optimizer)
             scaler.update()
+
+            if use_ema and ema_model is not None:
+                update_ema_model(ema_model, model, ema_decay)
 
             running_loss  += loss.item()
             running_pit   += pit_loss.item()
@@ -307,7 +378,7 @@ def train():
                     f"  Ep [{epoch+1:02d}/{epochs}] "
                     f"Batch [{batch_idx+1:03d}/{len(train_loader):03d}] "
                     f"Loss: {loss.item():.4f} | PIT: {pit_loss.item():.4f} | "
-                    f"STFT: {stft_loss.item():.4f}"
+                    f"STFT: {stft_loss.item():.4f} | STFTw: {epoch_stft_w:.3f}"
                 )
 
         n_train = max(1, len(train_loader))
@@ -315,18 +386,24 @@ def train():
         avg_train_pit   = running_pit   / n_train
         avg_train_stft  = running_stft  / n_train
 
-        val_loss, val_pit, val_stft = evaluate_epoch(model, val_loader, device, stft_w)
+        eval_model = ema_model if (use_ema and ema_model is not None) else model
+        val_loss, val_pit, val_stft = evaluate_epoch(eval_model, val_loader, device, epoch_stft_w)
         scheduler.step()
         current_lr   = optimizer.param_groups[0]["lr"]
         epoch_secs   = time.time() - epoch_start
 
-        is_best = val_loss < (best_val_loss - min_delta)
+        # Prioritize separation quality directly (PIT SI-SDR) for checkpoint selection.
+        is_best = val_pit < (best_val_pit - min_delta)
         if is_best:
+            best_state = eval_model.state_dict()
+            best_val_pit = val_pit
             best_val_loss     = val_loss
             no_improve_epochs = 0
             torch.save({
-                "model_state_dict": model.state_dict(),
+                "model_state_dict": best_state,
+                "student_model_state_dict": model.state_dict(),
                 "best_val_loss":    best_val_loss,
+                "best_val_pit":     best_val_pit,
                 "config":           MODEL_CONFIG,
             }, BEST_CKPT)
             print(f"  [BEST] Saved best checkpoint → {BEST_CKPT}")
@@ -336,11 +413,13 @@ def train():
         # Always save last checkpoint for Colab session resumption
         torch.save({
             "epoch":               epoch + 1,
-            "model_state_dict":    model.state_dict(),
+            "model_state_dict":    eval_model.state_dict(),
+            "student_model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
             "scaler_state_dict":    scaler.state_dict(),
             "best_val_loss":        best_val_loss,
+            "best_val_pit":         best_val_pit,
             "no_improve_epochs":    no_improve_epochs,
             "config":               MODEL_CONFIG,
         }, LAST_CKPT)
@@ -349,7 +428,7 @@ def train():
             f"Epoch {epoch+1:02d} | "
             f"Train {avg_train_loss:.4f} (PIT {avg_train_pit:.4f} STFT {avg_train_stft:.4f}) | "
             f"Val {val_loss:.4f} (PIT {val_pit:.4f} STFT {val_stft:.4f}) | "
-            f"LR {current_lr:.2e} | {epoch_secs:.0f}s"
+            f"STFTw {epoch_stft_w:.3f} | LR {current_lr:.2e} | {epoch_secs:.0f}s"
             + (" ★" if is_best else f" [no improve {no_improve_epochs}/{patience}]")
         )
         print("-" * 70)
@@ -364,7 +443,9 @@ def train():
             "val_pit":          f"{val_pit:.6f}",
             "val_stft":         f"{val_stft:.6f}",
             "lr":               f"{current_lr:.10f}",
+            "stft_weight_epoch": f"{epoch_stft_w:.6f}",
             "best_val_loss":    f"{best_val_loss:.6f}",
+            "best_val_pit":     f"{best_val_pit:.6f}",
             "is_best":          int(is_best),
             "no_improve_epochs": no_improve_epochs,
             "epoch_seconds":    f"{epoch_secs:.3f}",

@@ -1,7 +1,18 @@
 .venv/
+__pycache__/
 pycache/
 *.pyc
+
+# Large model checkpoints — download from Colab, don't commit directly
+backend/last_tfgridnet.pth
+
+# Dataset & generated data — lives in Google Drive, not the repo
+backend/data/
 backend/pretrained_models/
 backend/temp_audio/
-backend/data/
+
+# Training artifacts — generated locally, commit selectively
 backend/figures/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
