@@ -1,0 +1,742 @@
+{
+  "n_mixtures": 10,
+  "sample_rate_hz": 8000,
+  "pipelines": [
+    "sepformer_energy",
+    "sepformer_embed_select",
+    "ecw_tse_blind",
+    "ecw_tse_with_ref",
+    "tf_gridnet"
+  ],
+  "aggregates": {
+    "sepformer_energy": {
+      "n": 10,
+      "si_sdr_db_mean": 15.834867382049561,
+      "si_sdr_db_std": 2.164402069314163,
+      "sdr_db_mean": 6.220643889904022,
+      "sdr_db_std": 5.255462320969839,
+      "si_sdri_db_mean": 15.344272055942564,
+      "si_sdri_db_std": 2.4407117838116106,
+      "elapsed_s_mean": 5.1907
+    },
+    "sepformer_embed_select": {
+      "n": 10,
+      "si_sdr_db_mean": 15.683529663085938,
+      "si_sdr_db_std": 2.3759721816547765,
+      "sdr_db_mean": -2.2545173525810243,
+      "sdr_db_std": 5.023634079096634,
+      "si_sdri_db_mean": 15.426773150265216,
+      "si_sdri_db_std": 2.411651182473076,
+      "elapsed_s_mean": 7.4025
+    },
+    "ecw_tse_blind": {
+      "n": 10,
+      "si_sdr_db_mean": 12.33078670501709,
+      "si_sdr_db_std": 1.2400258870610885,
+      "sdr_db_mean": 7.6356396079063416,
+      "sdr_db_std": 3.7512183984634877,
+      "si_sdri_db_mean": 11.840191378910095,
+      "si_sdri_db_std": 1.1368796432444053,
+      "elapsed_s_mean": 7.7466,
+      "icr_iterations_mean": 2.1,
+      "target_similarity_mean": 0.9999999761581421,
+      "confidence_margin_mean": 0.7828865066170693
+    },
+    "ecw_tse_with_ref": {
+      "n": 10,
+      "si_sdr_db_mean": 12.11121187210083,
+      "si_sdr_db_std": 1.5023237691168874,
+      "sdr_db_mean": 5.132002717256546,
+      "sdr_db_std": 4.4835215089553335,
+      "si_sdri_db_mean": 11.85445535928011,
+      "si_sdri_db_std": 1.075211087717567,
+      "elapsed_s_mean": 7.2038,
+      "icr_iterations_mean": 2,
+      "target_similarity_mean": 0.7165201902389526,
+      "confidence_margin_mean": 0.6068687767721712
+    },
+    "tf_gridnet": {
+      "n": 10,
+      "si_sdr_db_mean": 1.4148349545896053,
+      "si_sdr_db_std": 1.6207219092595726,
+      "sdr_db_mean": 0.9294429227709771,
+      "sdr_db_std": 1.9640822856334132,
+      "si_sdri_db_mean": 1.3565725088119507,
+      "si_sdri_db_std": 1.4326296545150528,
+      "elapsed_s_mean": 1.3879000000000001
+    }
+  },
+  "per_mixture": [
+    {
+      "index": 0,
+      "mix_path": "mix_0.wav",
+      "mixture_si_sdr_vs_s1_db": 0.0664166808128357,
+      "mixture_si_sdr_vs_s2_db": -0.207192525267601,
+      "pipelines": {
+        "sepformer_energy": {
+          "si_sdr_db": 17.764402389526367,
+          "sdr_db": 0.7121119499206543,
+          "si_sdri_db": 17.69798570871353,
+          "matched_speaker": "s1",
+          "elapsed_s": 20.301
+        },
+        "sepformer_embed_select": {
+          "si_sdr_db": 17.764402389526367,
+          "sdr_db": 0.7121119499206543,
+          "si_sdri_db": 17.69798570871353,
+          "matched_speaker": "s1",
+          "elapsed_s": 30.762
+        },
+        "ecw_tse_blind": {
+          "si_sdr_db": 13.188776969909668,
+          "sdr_db": 1.2558000087738037,
+          "si_sdri_db": 13.122360289096832,
+          "matched_speaker": "s1",
+          "elapsed_s": 8.377,
+          "icr_iterations": 2,
+          "target_similarity": 1.0,
+          "confidence_margin": 0.7589210718870163,
+          "voice_activity_ratio": 0.6946107745170593,
+          "spectral_concentration": 0.8458178639411926,
+          "energy_ratio_target": 0.46272722097147273,
+          "energy_ratio_other": 0.4363564618253994,
+          "icr_alpha_trace": [
+            0.2410789281129837,
+            0.9199248552322388,
+            0.8933034539222717
+          ]
+        },
+        "ecw_tse_with_ref": {
+          "si_sdr_db": 13.31816291809082,
+          "sdr_db": 1.194777011871338,
+          "si_sdri_db": 13.251746237277985,
+          "matched_speaker": "s1",
+          "elapsed_s": 7.637,
+          "icr_iterations": 2,
+          "target_similarity": 0.7722641229629517,
+          "confidence_margin": 0.6023028045892715,
+          "voice_activity_ratio": 0.6946107745170593,
+          "spectral_concentration": 0.8442436456680298,
+          "energy_ratio_target": 0.46657139687473476,
+          "energy_ratio_other": 0.4324716963383837,
+          "icr_alpha_trace": [
+            0.16996131837368011,
+            0.7399512529373169,
+            0.7267081141471863
+          ]
+        },
+        "tf_gridnet": {
+          "si_sdr_db": 0.6130961179733276,
+          "sdr_db": 0.6227697134017944,
+          "si_sdri_db": 0.5466794371604919,
+          "matched_speaker": "s1",
+          "elapsed_s": 1.482
+        }
+      }
+    },
+    {
+      "index": 1,
+      "mix_path": "mix_1.wav",
+      "mixture_si_sdr_vs_s1_db": -0.06818518787622452,
+      "mixture_si_sdr_vs_s2_db": -0.07952813059091568,
+      "pipelines": {
+        "sepformer_energy": {
+          "si_sdr_db": 18.62662696838379,
+          "sdr_db": 6.807434558868408,
+          "si_sdri_db": 18.706155098974705,
+          "matched_speaker": "s2",
+          "elapsed_s": 3.564
+        },
+        "sepformer_embed_select": {
+          "si_sdr_db": 18.640708923339844,
+          "sdr_db": -6.58829402923584,
+          "si_sdri_db": 18.70889411121607,
+          "matched_speaker": "s1",
+          "elapsed_s": 4.566
+        },
+        "ecw_tse_blind": {
+          "si_sdr_db": 11.552390098571777,
+          "sdr_db": 7.663061141967773,
+          "si_sdri_db": 11.631918229162693,
+          "matched_speaker": "s2",
+          "elapsed_s": 7.257,
+          "icr_iterations": 2,
+          "target_similarity": 0.9999998807907104,
+          "confidence_margin": 0.7446922957897186,
+          "voice_activity_ratio": 0.5568862557411194,
+          "spectral_concentration": 0.8375866413116455,
+          "energy_ratio_target": 0.4191278667851088,
+          "energy_ratio_other": 0.4511117719740618,
+          "icr_alpha_trace": [
+            0.2553075850009918,
+            0.888473391532898,
+            0.8736950755119324
+          ]
+        },
+        "ecw_tse_with_ref": {
+          "si_sdr_db": 11.456071853637695,
+          "sdr_db": 0.5568467378616333,
+          "si_sdri_db": 11.52425704151392,
+          "matched_speaker": "s1",
+          "elapsed_s": 7.262,
+          "icr_iterations": 2,
+          "target_similarity": 0.7623394727706909,
+          "confidence_margin": 0.6130104064941406,
+          "voice_activity_ratio": 0.6946107745170593,
+          "spectral_concentration": 0.8272238373756409,
+          "energy_ratio_target": 0.48559072947400167,
+          "energy_ratio_other": 0.392326117525637,
+          "icr_alpha_trace": [
+            0.7623394727706909,
+            0.7572567462921143,
+            0.7399598360061646
+          ]
+        },
+        "tf_gridnet": {
+          "si_sdr_db": 0.7559783458709717,
+          "sdr_db": -1.433276891708374,
+          "si_sdri_db": 0.8241635337471962,
+          "matched_speaker": "s1",
+          "elapsed_s": 1.407
+        }
+      }
+    },
+    {
+      "index": 2,
+      "mix_path": "mix_2.wav",
+      "mixture_si_sdr_vs_s1_db": 0.09308810532093048,
+      "mixture_si_sdr_vs_s2_db": -0.0049462588503956795,
+      "pipelines": {
+        "sepformer_energy": {
+          "si_sdr_db": 17.378620147705078,
+          "sdr_db": 11.92104721069336,
+          "si_sdri_db": 17.383566406555474,
+          "matched_speaker": "s2",
+          "elapsed_s": 3.547
+        },
+        "sepformer_embed_select": {
+          "si_sdr_db": 17.47564697265625,
+          "sdr_db": -6.584400653839111,
+          "si_sdri_db": 17.38255886733532,
+          "matched_speaker": "s1",
+          "elapsed_s": 4.683
+        },
+        "ecw_tse_blind": {
+          "si_sdr_db": 12.994499206542969,
+          "sdr_db": 12.06341552734375,
+          "si_sdri_db": 12.999445465393364,
+          "matched_speaker": "s2",
+          "elapsed_s": 7.125,
+          "icr_iterations": 2,
+          "target_similarity": 1.0000001192092896,
+          "confidence_margin": 0.7105414271354675,
+          "voice_activity_ratio": 0.5409181714057922,
+          "spectral_concentration": 0.8159253001213074,
+          "energy_ratio_target": 0.42914673760489763,
+          "energy_ratio_other": 0.4485785937124513,
+          "icr_alpha_trace": [
+            0.289458692073822,
+            0.9160207509994507,
+            0.9121989607810974
+          ]
+        },
+        "ecw_tse_with_ref": {
+          "si_sdr_db": 12.885677337646484,
+          "sdr_db": 0.6173540353775024,
+          "si_sdri_db": 12.792589232325554,
+          "matched_speaker": "s1",
+          "elapsed_s": 7.225,
+          "icr_iterations": 2,
+          "target_similarity": 0.7463989853858948,
+          "confidence_margin": 0.6568126678466797,
+          "voice_activity_ratio": 0.6926147937774658,
+          "spectral_concentration": 0.8329741954803467,
+          "energy_ratio_target": 0.4849017695510437,
+          "energy_ratio_other": 0.3965775706746344,
+          "icr_alpha_trace": [
+            0.7463989853858948,
+            0.7715452909469604,
+            0.7706440687179565
+          ]
+        },
+        "tf_gridnet": {
+          "si_sdr_db": 0.6016619205474854,
+          "sdr_db": 1.2343953847885132,
+          "si_sdri_db": 0.5085738152265549,
+          "matched_speaker": "s1",
+          "elapsed_s": 1.344
+        }
+      }
+    },
+    {
+      "index": 3,
+      "mix_path": "mix_3.wav",
+      "mixture_si_sdr_vs_s1_db": 1.2702571153640747,
+      "mixture_si_sdr_vs_s2_db": -1.111045241355896,
+      "pipelines": {
+        "sepformer_energy": {
+          "si_sdr_db": 15.419731140136719,
+          "sdr_db": 1.314193606376648,
+          "si_sdri_db": 14.149474024772644,
+          "matched_speaker": "s1",
+          "elapsed_s": 3.471
+        },
+        "sepformer_embed_select": {
+          "si_sdr_db": 15.419731140136719,
+          "sdr_db": 1.314193606376648,
+          "si_sdri_db": 14.149474024772644,
+          "matched_speaker": "s1",
+          "elapsed_s": 4.665
+        },
+        "ecw_tse_blind": {
+          "si_sdr_db": 13.371316909790039,
+          "sdr_db": 1.0451351404190063,
+          "si_sdri_db": 12.101059794425964,
+          "matched_speaker": "s1",
+          "elapsed_s": 6.972,
+          "icr_iterations": 2,
+          "target_similarity": 0.9999999403953552,
+          "confidence_margin": 0.8950425684452057,
+          "voice_activity_ratio": 0.7225548624992371,
+          "spectral_concentration": 0.844071090221405,
+          "energy_ratio_target": 0.5373082548967726,
+          "energy_ratio_other": 0.37277539824472744,
+          "icr_alpha_trace": [
+            0.10495737195014954,
+            0.8266236782073975,
+            0.8006818294525146
+          ]
+        },
+        "ecw_tse_with_ref": {
+          "si_sdr_db": 13.44112777709961,
+          "sdr_db": 1.0941038131713867,
+          "si_sdri_db": 12.170870661735535,
+          "matched_speaker": "s1",
+          "elapsed_s": 7.12,
+          "icr_iterations": 2,
+          "target_similarity": 0.632165253162384,
+          "confidence_margin": 0.5286610722541809,
+          "voice_activity_ratio": 0.7285429239273071,
+          "spectral_concentration": 0.839250922203064,
+          "energy_ratio_target": 0.5486337106790805,
+          "energy_ratio_other": 0.3669721139202757,
+          "icr_alpha_trace": [
+            0.10350418090820312,
+            0.6470901966094971,
+            0.6182850003242493
+          ]
+        },
+        "tf_gridnet": {
+          "si_sdr_db": 2.0345511436462402,
+          "sdr_db": 2.653045654296875,
+          "si_sdri_db": 3.1455963850021362,
+          "matched_speaker": "s2",
+          "elapsed_s": 1.298
+        }
+      }
+    },
+    {
+      "index": 4,
+      "mix_path": "mix_4.wav",
+      "mixture_si_sdr_vs_s1_db": 0.12320241332054138,
+      "mixture_si_sdr_vs_s2_db": 0.06542845815420151,
+      "pipelines": {
+        "sepformer_energy": {
+          "si_sdr_db": 15.667573928833008,
+          "sdr_db": 9.357585906982422,
+          "si_sdri_db": 15.602145470678806,
+          "matched_speaker": "s2",
+          "elapsed_s": 3.419
+        },
+        "sepformer_embed_select": {
+          "si_sdr_db": 15.663673400878906,
+          "sdr_db": -6.49904203414917,
+          "si_sdri_db": 15.540470987558365,
+          "matched_speaker": "s1",
+          "elapsed_s": 4.707
+        },
+        "ecw_tse_blind": {
+          "si_sdr_db": 12.753152847290039,
+          "sdr_db": 8.414372444152832,
+          "si_sdri_db": 12.687724389135838,
+          "matched_speaker": "s2",
+          "elapsed_s": 7.383,
+          "icr_iterations": 2,
+          "target_similarity": 1.0,
+          "confidence_margin": 0.762270450592041,
+          "voice_activity_ratio": 0.5908183455467224,
+          "spectral_concentration": 0.8442743420600891,
+          "energy_ratio_target": 0.421110024365448,
+          "energy_ratio_other": 0.4512017895603082,
+          "icr_alpha_trace": [
+            0.23772954940795898,
+            0.9258438348770142,
+            0.9110655784606934
+          ]
+        },
+        "ecw_tse_with_ref": {
+          "si_sdr_db": 12.577285766601562,
+          "sdr_db": 0.8169856667518616,
+          "si_sdri_db": 12.454083353281021,
+          "matched_speaker": "s1",
+          "elapsed_s": 7.239,
+          "icr_iterations": 2,
+          "target_similarity": 0.7184393405914307,
+          "confidence_margin": 0.6279449313879013,
+          "voice_activity_ratio": 0.6926147937774658,
+          "spectral_concentration": 0.8318794965744019,
+          "energy_ratio_target": 0.48356853291553237,
+          "energy_ratio_other": 0.39469828166716814,
+          "icr_alpha_trace": [
+            0.7184393405914307,
+            0.7225916981697083,
+            0.7026571035385132
+          ]
+        },
+        "tf_gridnet": {
+          "si_sdr_db": 0.09178557991981506,
+          "sdr_db": -2.8173422813415527,
+          "si_sdri_db": -0.03141683340072632,
+          "matched_speaker": "s1",
+          "elapsed_s": 1.474
+        }
+      }
+    },
+    {
+      "index": 5,
+      "mix_path": "mix_5.wav",
+      "mixture_si_sdr_vs_s1_db": 0.031742095947265625,
+      "mixture_si_sdr_vs_s2_db": 0.28719013929367065,
+      "pipelines": {
+        "sepformer_energy": {
+          "si_sdr_db": 10.532636642456055,
+          "sdr_db": 4.305549621582031,
+          "si_sdri_db": 10.245446503162384,
+          "matched_speaker": "s2",
+          "elapsed_s": 3.543
+        },
+        "sepformer_embed_select": {
+          "si_sdr_db": 10.089824676513672,
+          "sdr_db": -3.6831107139587402,
+          "si_sdri_db": 10.058082580566406,
+          "matched_speaker": "s1",
+          "elapsed_s": 4.55
+        },
+        "ecw_tse_blind": {
+          "si_sdr_db": 9.992368698120117,
+          "sdr_db": 5.277153015136719,
+          "si_sdri_db": 9.705178558826447,
+          "matched_speaker": "s2",
+          "elapsed_s": 7.228,
+          "icr_iterations": 2,
+          "target_similarity": 0.9999999403953552,
+          "confidence_margin": 0.7588119357824326,
+          "voice_activity_ratio": 0.5788423418998718,
+          "spectral_concentration": 0.8478999137878418,
+          "energy_ratio_target": 0.4631188379950056,
+          "energy_ratio_other": 0.3943346822622827,
+          "icr_alpha_trace": [
+            0.24118800461292267,
+            0.939037561416626,
+            0.9352617859840393
+          ]
+        },
+        "ecw_tse_with_ref": {
+          "si_sdr_db": 9.842287063598633,
+          "sdr_db": 8.966520309448242,
+          "si_sdri_db": 9.810544967651367,
+          "matched_speaker": "s1",
+          "elapsed_s": 7.165,
+          "icr_iterations": 2,
+          "target_similarity": 0.6725015044212341,
+          "confidence_margin": 0.5141927152872086,
+          "voice_activity_ratio": 0.5788423418998718,
+          "spectral_concentration": 0.8409091234207153,
+          "energy_ratio_target": 0.41677862245908937,
+          "energy_ratio_other": 0.4406796642410683,
+          "icr_alpha_trace": [
+            0.6725015044212341,
+            0.6894121766090393,
+            0.6664696335792542
+          ]
+        },
+        "tf_gridnet": {
+          "si_sdr_db": -0.08640069514513016,
+          "sdr_db": -0.2513737380504608,
+          "si_sdri_db": -0.3735908344388008,
+          "matched_speaker": "s2",
+          "elapsed_s": 1.355
+        }
+      }
+    },
+    {
+      "index": 6,
+      "mix_path": "mix_6.wav",
+      "mixture_si_sdr_vs_s1_db": 1.1334240436553955,
+      "mixture_si_sdr_vs_s2_db": -0.975753664970398,
+      "pipelines": {
+        "sepformer_energy": {
+          "si_sdr_db": 15.9236478805542,
+          "sdr_db": -4.318611145019531,
+          "si_sdri_db": 14.790223836898804,
+          "matched_speaker": "s1",
+          "elapsed_s": 3.533
+        },
+        "sepformer_embed_select": {
+          "si_sdr_db": 15.9236478805542,
+          "sdr_db": -4.318611145019531,
+          "si_sdri_db": 14.790223836898804,
+          "matched_speaker": "s1",
+          "elapsed_s": 4.618
+        },
+        "ecw_tse_blind": {
+          "si_sdr_db": 14.289220809936523,
+          "sdr_db": 11.553184509277344,
+          "si_sdri_db": 13.155796766281128,
+          "matched_speaker": "s1",
+          "elapsed_s": 7.227,
+          "icr_iterations": 2,
+          "target_similarity": 1.0,
+          "confidence_margin": 0.7960540950298309,
+          "voice_activity_ratio": 0.6207584738731384,
+          "spectral_concentration": 0.8325968980789185,
+          "energy_ratio_target": 0.5604058377600726,
+          "energy_ratio_other": 0.3703446433978674,
+          "icr_alpha_trace": [
+            1.0,
+            0.9132090210914612,
+            0.8986799716949463
+          ]
+        },
+        "ecw_tse_with_ref": {
+          "si_sdr_db": 14.34968090057373,
+          "sdr_db": 11.705692291259766,
+          "si_sdri_db": 13.216256856918335,
+          "matched_speaker": "s1",
+          "elapsed_s": 7.303,
+          "icr_iterations": 2,
+          "target_similarity": 0.6514562368392944,
+          "confidence_margin": 0.46515873074531555,
+          "voice_activity_ratio": 0.6187624931335449,
+          "spectral_concentration": 0.838082492351532,
+          "energy_ratio_target": 0.5554201052630137,
+          "energy_ratio_other": 0.3754678269606999,
+          "icr_alpha_trace": [
+            0.6514562368392944,
+            0.6480027437210083,
+            0.6436983346939087
+          ]
+        },
+        "tf_gridnet": {
+          "si_sdr_db": 1.762589693069458,
+          "sdr_db": 3.131098747253418,
+          "si_sdri_db": 2.738343358039856,
+          "matched_speaker": "s2",
+          "elapsed_s": 1.348
+        }
+      }
+    },
+    {
+      "index": 7,
+      "mix_path": "mix_7.wav",
+      "mixture_si_sdr_vs_s1_db": -0.07228871434926987,
+      "mixture_si_sdr_vs_s2_db": -0.16075818240642548,
+      "pipelines": {
+        "sepformer_energy": {
+          "si_sdr_db": 17.40505027770996,
+          "sdr_db": 12.239500045776367,
+          "si_sdri_db": 17.565808460116386,
+          "matched_speaker": "s2",
+          "elapsed_s": 3.414
+        },
+        "sepformer_embed_select": {
+          "si_sdr_db": 17.441997528076172,
+          "sdr_db": -4.9496169090271,
+          "si_sdri_db": 17.51428624242544,
+          "matched_speaker": "s1",
+          "elapsed_s": 4.493
+        },
+        "ecw_tse_blind": {
+          "si_sdr_db": 10.797956466674805,
+          "sdr_db": 10.388646125793457,
+          "si_sdri_db": 10.95871464908123,
+          "matched_speaker": "s2",
+          "elapsed_s": 7.15,
+          "icr_iterations": 2,
+          "target_similarity": 1.0,
+          "confidence_margin": 0.7333403825759888,
+          "voice_activity_ratio": 0.5369261503219604,
+          "spectral_concentration": 0.8256822228431702,
+          "energy_ratio_target": 0.40772383590527544,
+          "energy_ratio_other": 0.4453050485575243,
+          "icr_alpha_trace": [
+            0.26665961742401123,
+            0.8905690312385559,
+            0.8555246591567993
+          ]
+        },
+        "ecw_tse_with_ref": {
+          "si_sdr_db": 10.667728424072266,
+          "sdr_db": 6.066106796264648,
+          "si_sdri_db": 10.740017138421535,
+          "matched_speaker": "s1",
+          "elapsed_s": 7.094,
+          "icr_iterations": 2,
+          "target_similarity": 0.8208948373794556,
+          "confidence_margin": 0.6670482754707336,
+          "voice_activity_ratio": 0.57485032081604,
+          "spectral_concentration": 0.838016927242279,
+          "energy_ratio_target": 0.48049429945625616,
+          "energy_ratio_other": 0.3805398061173356,
+          "icr_alpha_trace": [
+            0.8208948373794556,
+            0.7598121166229248,
+            0.7355022430419922
+          ]
+        },
+        "tf_gridnet": {
+          "si_sdr_db": -0.2928956151008606,
+          "sdr_db": 0.09813989698886871,
+          "si_sdri_db": -0.13213743269443512,
+          "matched_speaker": "s2",
+          "elapsed_s": 1.4
+        }
+      }
+    },
+    {
+      "index": 8,
+      "mix_path": "mix_8.wav",
+      "mixture_si_sdr_vs_s1_db": 1.1388084888458252,
+      "mixture_si_sdr_vs_s2_db": -1.179433822631836,
+      "pipelines": {
+        "sepformer_energy": {
+          "si_sdr_db": 15.014386177062988,
+          "sdr_db": 10.461528778076172,
+          "si_sdri_db": 13.875577688217163,
+          "matched_speaker": "s1",
+          "elapsed_s": 3.589
+        },
+        "sepformer_embed_select": {
+          "si_sdr_db": 15.014386177062988,
+          "sdr_db": 10.461528778076172,
+          "si_sdri_db": 13.875577688217163,
+          "matched_speaker": "s1",
+          "elapsed_s": 6.422
+        },
+        "ecw_tse_blind": {
+          "si_sdr_db": 12.748323440551758,
+          "sdr_db": 10.35159969329834,
+          "si_sdri_db": 11.609514951705933,
+          "matched_speaker": "s1",
+          "elapsed_s": 10.817,
+          "icr_iterations": 2,
+          "target_similarity": 1.0,
+          "confidence_margin": 0.8091890960931778,
+          "voice_activity_ratio": 0.5888223648071289,
+          "spectral_concentration": 0.8170090913772583,
+          "energy_ratio_target": 0.5385515435921895,
+          "energy_ratio_other": 0.37734550872026135,
+          "icr_alpha_trace": [
+            0.1908109039068222,
+            0.8722448348999023,
+            0.8635813593864441
+          ]
+        },
+        "ecw_tse_with_ref": {
+          "si_sdr_db": 12.78658676147461,
+          "sdr_db": 10.388802528381348,
+          "si_sdri_db": 11.647778272628784,
+          "matched_speaker": "s1",
+          "elapsed_s": 6.764,
+          "icr_iterations": 2,
+          "target_similarity": 0.6865309476852417,
+          "confidence_margin": 0.6943639237433672,
+          "voice_activity_ratio": 0.5888223648071289,
+          "spectral_concentration": 0.8160290718078613,
+          "energy_ratio_target": 0.5405607259812901,
+          "energy_ratio_other": 0.3763610192221951,
+          "icr_alpha_trace": [
+            -0.007832976058125496,
+            0.596390962600708,
+            0.5913138389587402
+          ]
+        },
+        "tf_gridnet": {
+          "si_sdr_db": 4.159601211547852,
+          "sdr_db": 2.8659298419952393,
+          "si_sdri_db": 3.0207927227020264,
+          "matched_speaker": "s1",
+          "elapsed_s": 1.36
+        }
+      }
+    },
+    {
+      "index": 9,
+      "mix_path": "mix_9.wav",
+      "mixture_si_sdr_vs_s1_db": -1.1488999128341675,
+      "mixture_si_sdr_vs_s2_db": 1.189660906791687,
+      "pipelines": {
+        "sepformer_energy": {
+          "si_sdr_db": 14.615998268127441,
+          "sdr_db": 9.406098365783691,
+          "si_sdri_db": 13.426337361335754,
+          "matched_speaker": "s2",
+          "elapsed_s": 3.526
+        },
+        "sepformer_embed_select": {
+          "si_sdr_db": 13.401277542114258,
+          "sdr_db": -2.4099323749542236,
+          "si_sdri_db": 14.550177454948425,
+          "matched_speaker": "s1",
+          "elapsed_s": 4.559
+        },
+        "ecw_tse_blind": {
+          "si_sdr_db": 11.619861602783203,
+          "sdr_db": 8.34402847290039,
+          "si_sdri_db": 10.430200695991516,
+          "matched_speaker": "s2",
+          "elapsed_s": 7.93,
+          "icr_iterations": 3,
+          "target_similarity": 0.9999998807907104,
+          "confidence_margin": 0.8600017428398132,
+          "voice_activity_ratio": 0.6167664527893066,
+          "spectral_concentration": 0.8437293171882629,
+          "energy_ratio_target": 0.5891210057598834,
+          "energy_ratio_other": 0.3536563879034679,
+          "icr_alpha_trace": [
+            0.13999813795089722,
+            0.8241010308265686,
+            0.8327234983444214,
+            0.8356921672821045
+          ]
+        },
+        "ecw_tse_with_ref": {
+          "si_sdr_db": 9.78750991821289,
+          "sdr_db": 9.912837982177734,
+          "si_sdri_db": 10.936409831047058,
+          "matched_speaker": "s1",
+          "elapsed_s": 7.229,
+          "icr_iterations": 2,
+          "target_similarity": 0.7022112011909485,
+          "confidence_margin": 0.6991922399029136,
+          "voice_activity_ratio": 0.658682644367218,
+          "spectral_concentration": 0.7286548614501953,
+          "energy_ratio_target": 0.4140544944626436,
+          "energy_ratio_other": 0.47449268905546704,
+          "icr_alpha_trace": [
+            0.7022112011909485,
+            0.6828532814979553,
+            0.6754652261734009
+          ]
+        },
+        "tf_gridnet": {
+          "si_sdr_db": 4.5083818435668945,
+          "sdr_db": 3.191042900085449,
+          "si_sdri_db": 3.3187209367752075,
+          "matched_speaker": "s2",
+          "elapsed_s": 1.411
+        }
+      }
+    }
+  ]
+}

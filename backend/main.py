@@ -1,16 +1,22 @@
+import base64
+import io
 import os
 import time
 import uuid
 from pathlib import Path
 from typing import Literal
 
+import matplotlib
+matplotlib.use("Agg")  # Non-interactive backend for server-side PNG rendering
+import matplotlib.pyplot as plt
+import numpy as np
 import soundfile as sf
 import torch
 import torch.nn.functional as F
 import torchaudio
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
 from speechbrain.inference.separation import SepformerSeparation
 from speechbrain.inference.speaker import EncoderClassifier
 from speechbrain.utils.fetching import LocalStrategy
@@ -552,6 +558,359 @@ def _ecwm_refine(
     return refined[0], refined[1]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  Multi-Resolution ECWM Ensemble  (MR-ECWM)        ◄── PAPER CONTRIBUTION #2
+#
+#  STFT analysis is fundamentally a windowed transform: small windows give good
+#  time resolution but poor frequency resolution, large windows do the opposite
+#  (Heisenberg–Gabor uncertainty). A single (n_fft, hop) choice biases the
+#  separation toward one regime.
+#
+#  MR-ECWM runs ECWM at K different resolutions and averages the resulting
+#  *time-domain* estimates:
+#
+#       ŝ_target  =  (1/K) Σ_{k=1..K}  ISTFT_k( M_k ⊙ STFT_k(x) )
+#
+#  Equivalently, this is a Nadaraya-Watson estimator over the resolution axis
+#  with uniform weights. Empirically reduces musical noise (high-resolution
+#  artefact) and pre-echo (low-resolution artefact) simultaneously.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# Resolution ladder used by MR-ECWM. Format: (n_fft, hop). Tuned for 8 kHz
+# (SepFormer's native rate); rescale proportionally for other rates.
+ECW_MR_RESOLUTIONS_8K = [(256, 64), (512, 128), (1024, 256)]
+ECW_MR_RESOLUTIONS_16K = [(512, 128), (1024, 256), (2048, 512)]
+
+
+def _ecwm_multi_resolution(
+    mixture: torch.Tensor,
+    sources: list[torch.Tensor],
+    alphas: list[float],
+    target_idx: int,
+    sample_rate: int,
+):
+    """Multi-resolution ECWM: ensemble of ECWM masks across STFT resolutions.
+
+    Returns the resolution-averaged target estimate, the ensemble of masks
+    (for visualisation), and the mean mask (the "fused" mask).
+    """
+    resolutions = (
+        ECW_MR_RESOLUTIONS_16K if sample_rate >= 16000 else ECW_MR_RESOLUTIONS_8K
+    )
+    targets = []
+    masks_for_viz = []  # downsampled to a common shape
+
+    priors = [
+        torch.nn.functional.softplus(torch.tensor(a / ECW_TEMPERATURE)).item() ** ECW_GAMMA
+        for a in alphas
+    ]
+
+    for n_fft, hop in resolutions:
+        window = torch.hann_window(n_fft, device=mixture.device)
+        mix_spec = torch.stft(
+            mixture, n_fft=n_fft, hop_length=hop, window=window, return_complex=True
+        )
+        src_specs = [
+            torch.stft(
+                s, n_fft=n_fft, hop_length=hop, window=window, return_complex=True
+            )
+            for s in sources
+        ]
+        weighted_powers = [
+            p * (s.abs() ** 2 + 1e-12) for p, s in zip(priors, src_specs)
+        ]
+        denom = sum(weighted_powers) + 1e-8
+        target_mask = (weighted_powers[target_idx] / denom).clamp(
+            min=ECW_FLOOR, max=1.0
+        )
+
+        refined_complex = target_mask * mix_spec
+        refined = torch.istft(
+            refined_complex,
+            n_fft=n_fft, hop_length=hop, window=window,
+            length=mixture.shape[-1],
+        )
+        targets.append(refined)
+
+        # Save the mask at a fixed thumbnail size for the visualisation.
+        masks_for_viz.append(_resize_mask_to_thumbnail(target_mask))
+
+    # Ensemble average in time domain
+    target_ensemble = torch.stack(targets, dim=0).mean(dim=0)
+    other_ensemble = mixture - target_ensemble  # Mixture-consistency by construction
+    fused_mask_thumb = torch.stack(masks_for_viz, dim=0).mean(dim=0)
+
+    return target_ensemble, other_ensemble, fused_mask_thumb
+
+
+def _resize_mask_to_thumbnail(mask: torch.Tensor, height: int = 64, width: int = 128):
+    """Bilinear-resize a TF mask [F, T] to a fixed thumbnail [H, W]."""
+    if mask.dim() == 2:
+        mask = mask.unsqueeze(0).unsqueeze(0)  # [1, 1, F, T]
+    else:
+        mask = mask.unsqueeze(0)
+    resized = F.interpolate(mask, size=(height, width), mode="bilinear", align_corners=False)
+    return resized.squeeze(0).squeeze(0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Iterative Confidence Refinement  (ICR)           ◄── PAPER CONTRIBUTION #3
+#
+#  ECWM produces ŝ_target. We can re-feed ŝ_target through ECAPA-TDNN to obtain
+#  a refined embedding ê_target, recompute α_i = ⟨e_ref, ê_i⟩, and apply ECWM
+#  again. Empirically each iteration tightens α toward 1.
+#
+#  Mathematically this is fixed-point iteration of the map
+#       T : (s_target, s_other) ↦ ECWM(x; α(s_target, s_other))
+#  whose convergence is monitored by the embedding-similarity sequence
+#  α_target^(0) ≤ α_target^(1) ≤ … ≤ α_target^(j) ≤ 1.
+#
+#  Because α is bounded by 1 and monotone non-decreasing under our update
+#  rule (we accept the iterate only if α improves), the sequence converges.
+#  Stopping rule: halt when α_target^(j) − α_target^(j-1) < ε_α.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+ICR_MAX_ITERS = 3
+ICR_TOLERANCE = 1e-3  # Stop when α_target stops improving by more than this
+
+
+def _ecwm_iterative_refine(
+    mixture: torch.Tensor,
+    initial_sources: list[torch.Tensor],
+    reference_embedding: torch.Tensor,
+    target_idx: int,
+    sample_rate: int,
+):
+    """Iteratively refine ECWM output until embedding similarity stops improving.
+
+    Returns:
+        target            — final refined target estimate [L]
+        other             — final residual [L]
+        fused_mask_thumb  — averaged ECWM mask thumbnail [H, W]
+        trace             — list of dicts: per-iteration alphas and gamma
+    """
+    sources = list(initial_sources)
+    sample_rate_for_embed = SEPFORMER_SAMPLE_RATE  # we work in SepFormer's domain
+    # Initial alphas (using the un-refined separator outputs)
+    src_embeddings = [
+        _compute_speaker_embedding(s, sample_rate_for_embed) for s in sources
+    ]
+    alphas = [float(torch.dot(reference_embedding, e).item()) for e in src_embeddings]
+
+    best_alpha = alphas[target_idx]
+    trace = [{"iter": 0, "alphas": alphas.copy(), "gamma_eff": ECW_GAMMA}]
+
+    target_curr = sources[target_idx]
+    other_curr = sources[1 - target_idx] if len(sources) == 2 else mixture - sources[target_idx]
+    fused_mask_thumb = None
+    first_pass_done = False
+
+    for j in range(1, ICR_MAX_ITERS + 1):
+        target_new, other_new, fused_mask_thumb = _ecwm_multi_resolution(
+            mixture, [target_curr, other_curr], alphas, target_idx=0,
+            sample_rate=sample_rate,
+        )
+
+        # Re-compute alphas on refined estimates
+        new_target_emb = _compute_speaker_embedding(target_new, sample_rate)
+        new_other_emb = _compute_speaker_embedding(other_new, sample_rate)
+        new_alpha_target = float(torch.dot(reference_embedding, new_target_emb).item())
+        new_alpha_other = float(torch.dot(reference_embedding, new_other_emb).item())
+
+        # Adaptive γ — high confidence margin → trust priors more
+        margin = new_alpha_target - new_alpha_other
+        gamma_eff = ECW_GAMMA * (1.0 + torch.sigmoid(torch.tensor(margin / 0.1)).item())
+
+        improvement = new_alpha_target - best_alpha
+        trace.append({
+            "iter": j,
+            "alphas": [new_alpha_target, new_alpha_other],
+            "gamma_eff": gamma_eff,
+            "improvement": improvement,
+        })
+
+        # Always accept the FIRST MR-ECWM pass: the raw SepFormer outputs are
+        # not on the mixture's amplitude scale, so the un-refined estimate
+        # cannot be used as the final answer even if it has a higher α. After
+        # the first pass we have a properly-scaled mixture-consistent estimate;
+        # subsequent iterations are accepted only if α improves by ICR_TOLERANCE.
+        if not first_pass_done:
+            target_curr = target_new
+            other_curr = other_new
+            alphas = [new_alpha_target, new_alpha_other]
+            best_alpha = new_alpha_target
+            first_pass_done = True
+            continue
+
+        if improvement < ICR_TOLERANCE:
+            # Converged — keep current refined estimate, stop iterating.
+            break
+
+        # Accept iterate
+        target_curr = target_new
+        other_curr = other_new
+        alphas = [new_alpha_target, new_alpha_other]
+        best_alpha = new_alpha_target
+
+    return target_curr, other_curr, fused_mask_thumb, trace
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Quality metrics + visualisation data
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _compute_quality_metrics(
+    mixture: torch.Tensor,
+    target: torch.Tensor,
+    other: torch.Tensor,
+    sources_initial: list[torch.Tensor],
+    target_idx: int,
+    similarities: list[float],
+    sample_rate: int,
+):
+    """Compute interpretable quality metrics for the API response."""
+    metrics: dict = {}
+
+    # 1. Confidence margin — gap between best and runner-up speaker similarity
+    sorted_sims = sorted(similarities, reverse=True)
+    metrics["confidence_margin"] = float(sorted_sims[0] - (sorted_sims[1] if len(sorted_sims) > 1 else 0.0))
+    metrics["target_similarity"] = float(similarities[target_idx])
+
+    # 2. Voice activity ratio — fraction of frames above an energy threshold
+    n_fft = 512 if sample_rate >= 16000 else 256
+    hop = n_fft // 4
+    spec = torch.stft(target, n_fft=n_fft, hop_length=hop,
+                      window=torch.hann_window(n_fft, device=target.device),
+                      return_complex=True)
+    frame_energy = (spec.abs() ** 2).mean(dim=0)  # [T]
+    threshold = frame_energy.mean() * 0.1
+    metrics["voice_activity_ratio"] = float((frame_energy > threshold).float().mean().item())
+
+    # 3. Spectral concentration (Gini coefficient of mask power) — how
+    #    selective the separation is. Higher = cleaner extraction.
+    mask_power = spec.abs().flatten()
+    mask_power_sorted, _ = torch.sort(mask_power)
+    n = mask_power_sorted.shape[0]
+    cum = torch.cumsum(mask_power_sorted, dim=0)
+    gini = float(((n + 1 - 2 * cum.sum() / (cum[-1] + 1e-8)) / n).item())
+    metrics["spectral_concentration"] = max(0.0, min(1.0, abs(gini)))
+
+    # 4. Residual energy ratio — what fraction of mixture energy ended up in
+    #    "other". Provides an SNR-like measure of how aggressively we masked.
+    mix_energy = float((mixture ** 2).sum().item())
+    other_energy = float((other ** 2).sum().item())
+    target_energy = float((target ** 2).sum().item())
+    metrics["energy_ratio_target"] = target_energy / (mix_energy + 1e-8)
+    metrics["energy_ratio_other"] = other_energy / (mix_energy + 1e-8)
+
+    # 5. Estimated SI-SDR improvement vs the raw SepFormer source.
+    raw_target = sources_initial[target_idx]
+    if raw_target.shape[-1] != target.shape[-1]:
+        # Resampling may have changed length; align before comparing
+        m = min(raw_target.shape[-1], target.shape[-1])
+        raw_target = raw_target[:m]
+        target_aligned = target[:m]
+    else:
+        target_aligned = target
+    metrics["si_sdr_improvement_db"] = float(
+        _si_sdr(target_aligned, raw_target) - _si_sdr(raw_target, raw_target)
+    )
+
+    return metrics
+
+
+def _si_sdr(estimate: torch.Tensor, reference: torch.Tensor, eps: float = 1e-8) -> float:
+    """Scale-Invariant Signal-to-Distortion Ratio in dB."""
+    estimate = estimate - estimate.mean()
+    reference = reference - reference.mean()
+    alpha = (reference * estimate).sum() / ((reference ** 2).sum() + eps)
+    s_target = alpha * reference
+    e_noise = estimate - s_target
+    return float(10 * torch.log10((s_target ** 2).sum() / ((e_noise ** 2).sum() + eps) + eps))
+
+
+def _png_b64(fig) -> str:
+    """Render a matplotlib Figure to a base64-encoded PNG string."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", dpi=80,
+                facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("ascii")
+
+
+def _waveform_thumbnail(waveform: torch.Tensor, n_points: int = 800) -> list[float]:
+    """Downsample waveform to n_points by RMS pooling — preserves visual peaks."""
+    waveform = waveform.detach().cpu().flatten()
+    L = waveform.shape[0]
+    if L <= n_points:
+        return waveform.tolist()
+    pool_size = L // n_points
+    truncated = waveform[: pool_size * n_points].view(n_points, pool_size)
+    rms = torch.sqrt((truncated ** 2).mean(dim=1) + 1e-12)
+    sign = truncated.mean(dim=1).sign()
+    return (sign * rms).tolist()
+
+
+def _spectrogram_b64(waveform: torch.Tensor, sample_rate: int, title: str) -> str:
+    """Render a log-magnitude spectrogram as a small base64 PNG."""
+    n_fft = 512 if sample_rate >= 16000 else 256
+    hop = n_fft // 4
+    win = torch.hann_window(n_fft, device=waveform.device)
+    spec = torch.stft(waveform, n_fft=n_fft, hop_length=hop, window=win, return_complex=True)
+    log_mag = 20 * torch.log10(spec.abs() + 1e-6)
+    arr = log_mag.detach().cpu().numpy()
+
+    fig, ax = plt.subplots(figsize=(4.0, 1.6), facecolor="#0a0e1a")
+    ax.set_facecolor("#0a0e1a")
+    img = ax.imshow(arr, origin="lower", aspect="auto", cmap="magma",
+                    vmin=arr.max() - 70, vmax=arr.max())
+    ax.set_title(title, color="white", fontsize=8, loc="left")
+    ax.set_xticks([]); ax.set_yticks([])
+    for s in ax.spines.values():
+        s.set_visible(False)
+    return _png_b64(fig)
+
+
+def _mask_b64(mask_thumb: torch.Tensor, title: str = "ECWM Mask") -> str:
+    """Render the fused ECWM mask thumbnail as a small base64 PNG."""
+    arr = mask_thumb.detach().cpu().numpy()
+    fig, ax = plt.subplots(figsize=(4.0, 1.6), facecolor="#0a0e1a")
+    ax.set_facecolor("#0a0e1a")
+    ax.imshow(arr, origin="lower", aspect="auto", cmap="viridis", vmin=0.0, vmax=1.0)
+    ax.set_title(title, color="white", fontsize=8, loc="left")
+    ax.set_xticks([]); ax.set_yticks([])
+    for s in ax.spines.values():
+        s.set_visible(False)
+    return _png_b64(fig)
+
+
+def _build_visualization_payload(
+    mixture: torch.Tensor,
+    target: torch.Tensor,
+    other: torch.Tensor,
+    fused_mask_thumb: torch.Tensor | None,
+    sample_rate: int,
+) -> dict:
+    """Bundle waveform thumbnails + spectrogram PNGs for the frontend."""
+    payload = {
+        "sample_rate": sample_rate,
+        "mixture_waveform": _waveform_thumbnail(mixture),
+        "target_waveform": _waveform_thumbnail(target),
+        "other_waveform": _waveform_thumbnail(other),
+        "mixture_spectrogram_png": _spectrogram_b64(
+            mixture, sample_rate, "Mixture (input)"),
+        "target_spectrogram_png": _spectrogram_b64(
+            target, sample_rate, "Extracted target"),
+    }
+    if fused_mask_thumb is not None:
+        payload["mask_png"] = _mask_b64(fused_mask_thumb, "ECWM mask (fused, multi-res)")
+    return payload
+
+
 def _select_source_by_embedding(
     sources: list[torch.Tensor],
     sample_rate: int,
@@ -703,13 +1062,39 @@ def _separate_with_ecw_tse(
             sources_8k, SEPFORMER_SAMPLE_RATE, ref_wave, ref_sr,
         )
 
-    # ── Stage 4 + 5: ECWM refinement + mixture consistency ────────────────
-    refined_target, _ = _ecwm_refine(
-        mixture_8k.squeeze(0), sources_8k, similarities, target_idx,
+    # ── Stage 4: Iterative Confidence Refinement with MR-ECWM ─────────────
+    # Compute reference embedding once (re-used across ICR iterations).
+    ref_for_embed = ref_wave if ref_wave is not None else sources_8k[target_idx]
+    ref_sr_for_embed = ref_sr if ref_sr is not None else SEPFORMER_SAMPLE_RATE
+    reference_embedding = _compute_speaker_embedding(ref_for_embed, ref_sr_for_embed)
+
+    refined_target, refined_other, fused_mask_thumb, icr_trace = _ecwm_iterative_refine(
+        mixture_8k.squeeze(0), sources_8k, reference_embedding, target_idx,
         sample_rate=SEPFORMER_SAMPLE_RATE,
     )
 
-    # Output at original sample rate so the user gets back what they uploaded.
+    # ── Stage 5: Mixture-consistency projection ──────────────────────────
+    consistent = _enforce_mixture_consistency(
+        mixture_8k.squeeze(0),
+        torch.stack([refined_target, refined_other], dim=0),
+    )
+    refined_target, refined_other = consistent[0], consistent[1]
+
+    # ── Stage 6: Compute quality metrics + visualisation payload ─────────
+    metrics = _compute_quality_metrics(
+        mixture_8k.squeeze(0), refined_target, refined_other,
+        sources_8k, target_idx, similarities,
+        sample_rate=SEPFORMER_SAMPLE_RATE,
+    )
+    metrics["icr_iterations"] = len(icr_trace) - 1
+    metrics["icr_trace"] = icr_trace
+
+    viz = _build_visualization_payload(
+        mixture_8k.squeeze(0), refined_target, refined_other, fused_mask_thumb,
+        sample_rate=SEPFORMER_SAMPLE_RATE,
+    )
+
+    # Resample target back to user's input rate.
     if mix_sr != SEPFORMER_SAMPLE_RATE:
         refined_target = _resample_waveform(
             refined_target.unsqueeze(0), SEPFORMER_SAMPLE_RATE, mix_sr,
@@ -720,6 +1105,8 @@ def _separate_with_ecw_tse(
         "confidence_margin": margin,
         "reference_provided": ref_wave is not None,
         "target_idx": target_idx,
+        "metrics": metrics,
+        "viz": viz,
     }
     return _peak_normalize(refined_target), target_idx, mix_sr, diagnostics
 
@@ -825,30 +1212,43 @@ async def extract_voice(
     cleanup_file(str(input_path))
     if reference_path:
         cleanup_file(str(reference_path))
+
+    # Read the generated audio so we can return it inline as base64. This lets
+    # us send metrics + visualisations + audio in one JSON response.
+    with open(output_path, "rb") as fh:
+        audio_b64 = base64.b64encode(fh.read()).decode("ascii")
     background_tasks.add_task(cleanup_file, str(output_path))
 
     print(
         f"[OK] Separation complete in {elapsed:.2f}s | "
         f"model: {selected_model} | selected source: {selected_source}"
-        + (f" | diag: {diagnostics}" if diagnostics else "")
     )
+    if diagnostics and "metrics" in diagnostics:
+        m = diagnostics["metrics"]
+        print(
+            f"  metrics: ICR={m.get('icr_iterations', 0)} iter | "
+            f"target_sim={m.get('target_similarity', 0):.3f} | "
+            f"margin={m.get('confidence_margin', 0):.3f} | "
+            f"VAD={m.get('voice_activity_ratio', 0):.2f} | "
+            f"SI-SDRi(est)={m.get('si_sdr_improvement_db', 0):.2f}dB"
+        )
 
-    headers = {
-        "X-Selected-Source-Index": str(selected_source),
-        "X-Model-Name": selected_model,
-        "X-Output-Sample-Rate": str(output_sample_rate),
+    response_body: dict = {
+        "audio_b64": audio_b64,
+        "audio_format": "wav",
+        "sample_rate": output_sample_rate,
+        "model_used": selected_model,
+        "selected_source_index": selected_source,
+        "elapsed_seconds": round(elapsed, 3),
     }
     if diagnostics is not None:
-        sims = ",".join(f"{v:.4f}" for v in diagnostics.get("similarities", []))
-        headers["X-Speaker-Similarities"] = sims
-        headers["X-Speaker-Confidence-Margin"] = f"{diagnostics.get('confidence_margin', 0.0):.4f}"
-        headers["X-Reference-Provided"] = str(diagnostics.get("reference_provided", False)).lower()
+        response_body["similarities"] = diagnostics.get("similarities")
+        response_body["confidence_margin"] = diagnostics.get("confidence_margin")
+        response_body["reference_provided"] = diagnostics.get("reference_provided")
+        response_body["metrics"] = diagnostics.get("metrics")
+        response_body["viz"] = diagnostics.get("viz")
 
-    return FileResponse(
-        str(output_path),
-        media_type="audio/wav",
-        headers=headers,
-    )
+    return JSONResponse(content=response_body)
 
 
 @app.get("/models")

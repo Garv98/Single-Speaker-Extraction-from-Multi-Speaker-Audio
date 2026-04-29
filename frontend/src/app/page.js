@@ -48,8 +48,12 @@ export default function Home() {
   const [error, setError] = useState(null);
   const [audioUrl, setAudioUrl] = useState(null);
   const [elapsed, setElapsed] = useState(null);
+  const [metrics, setMetrics] = useState(null);
+  const [viz, setViz] = useState(null);
   const fileInputRef = useRef(null);
   const referenceInputRef = useRef(null);
+  const mixtureCanvasRef = useRef(null);
+  const targetCanvasRef = useRef(null);
 
   const activeModel = modelInfo[selectedModel] || FALLBACK_MODELS[selectedModel];
   const isSelectedModelAvailable = Boolean(activeModel?.available);
@@ -163,6 +167,8 @@ export default function Home() {
     setSelectedSourceIndex(null);
     setSimilarities(null);
     setConfidenceMargin(null);
+    setMetrics(null);
+    setViz(null);
 
     const startTime = performance.now();
     const formData = new FormData();
@@ -191,24 +197,23 @@ export default function Home() {
         throw new Error(detail);
       }
 
-      const modelHeader = response.headers.get('X-Model-Name');
-      const sourceHeader = response.headers.get('X-Selected-Source-Index');
-      const simsHeader = response.headers.get('X-Speaker-Similarities');
-      const marginHeader = response.headers.get('X-Speaker-Confidence-Margin');
+      const payload = await response.json();
+      setBackendModelUsed(payload.model_used || selectedModel);
+      setSelectedSourceIndex(payload.selected_source_index ?? null);
+      setSimilarities(payload.similarities ?? null);
+      setConfidenceMargin(payload.confidence_margin ?? null);
+      setMetrics(payload.metrics ?? null);
+      setViz(payload.viz ?? null);
 
-      setBackendModelUsed(modelHeader || selectedModel);
-      setSelectedSourceIndex(sourceHeader);
-      if (simsHeader) {
-        setSimilarities(simsHeader.split(',').map((s) => parseFloat(s)));
-      }
-      if (marginHeader) {
-        setConfidenceMargin(parseFloat(marginHeader));
-      }
-
-      const blob = await response.blob();
+      // Decode base64 WAV → blob URL for the <audio> element
+      const audioFmt = payload.audio_format || 'wav';
+      const binStr = atob(payload.audio_b64);
+      const bytes = new Uint8Array(binStr.length);
+      for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+      const blob = new Blob([bytes], { type: `audio/${audioFmt}` });
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
-      setElapsed(((performance.now() - startTime) / 1000).toFixed(2));
+      setElapsed(payload.elapsed_seconds?.toFixed?.(2) ?? ((performance.now() - startTime) / 1000).toFixed(2));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -223,6 +228,46 @@ export default function Home() {
       }
     };
   }, [audioUrl]);
+
+  const drawWaveform = (canvas, samples, color) => {
+    if (!canvas || !samples?.length) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0a0e1a';
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = '#1f2937';
+    ctx.beginPath();
+    ctx.moveTo(0, h / 2);
+    ctx.lineTo(w, h / 2);
+    ctx.stroke();
+
+    const N = samples.length;
+    let peak = 0;
+    for (let i = 0; i < N; i++) {
+      const a = Math.abs(samples[i]);
+      if (a > peak) peak = a;
+    }
+    const norm = peak > 0 ? 1 / peak : 1;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) {
+      const x = (i / (N - 1)) * w;
+      const y = h / 2 - samples[i] * norm * (h / 2 - 4);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  };
+
+  useEffect(() => {
+    if (!viz) return;
+    drawWaveform(mixtureCanvasRef.current, viz.mixture_waveform, '#888');
+    drawWaveform(targetCanvasRef.current, viz.target_waveform, '#22c55e');
+  }, [viz]);
 
   const waveBars = Array.from({ length: 40 }, (_, i) => {
     const h = 4 + ((Math.sin(i * 3.7 + 1.3) + 1) / 2) * 8;
@@ -411,6 +456,128 @@ export default function Home() {
                   {confidenceMargin !== null && (
                     <span>Confidence margin: {confidenceMargin.toFixed(3)}</span>
                   )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {viz && (
+            <div className={styles.audioResult}>
+              <div style={{ marginBottom: 12, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1.2 }}>
+                Waveforms
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: '#888' }}>Mixture (input)</div>
+                  <canvas ref={mixtureCanvasRef} width={560} height={70} style={{ width: '100%', borderRadius: 6, background: '#0a0e1a' }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#22c55e' }}>Extracted target</div>
+                  <canvas ref={targetCanvasRef} width={560} height={70} style={{ width: '100%', borderRadius: 6, background: '#0a0e1a' }} />
+                </div>
+              </div>
+
+              <div style={{ marginTop: 16, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1.2 }}>
+                Spectrograms
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
+                {viz.mixture_spectrogram_png && (
+                  <img alt="Mixture spectrogram"
+                       src={`data:image/png;base64,${viz.mixture_spectrogram_png}`}
+                       style={{ width: '100%', borderRadius: 6 }} />
+                )}
+                {viz.target_spectrogram_png && (
+                  <img alt="Target spectrogram"
+                       src={`data:image/png;base64,${viz.target_spectrogram_png}`}
+                       style={{ width: '100%', borderRadius: 6 }} />
+                )}
+              </div>
+
+              {viz.mask_png && (
+                <>
+                  <div style={{ marginTop: 16, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1.2 }}>
+                    Fused MR-ECWM Mask
+                  </div>
+                  <img alt="ECWM mask"
+                       src={`data:image/png;base64,${viz.mask_png}`}
+                       style={{ width: '100%', borderRadius: 6, marginTop: 6 }} />
+                </>
+              )}
+            </div>
+          )}
+
+          {metrics && (
+            <div className={styles.audioResult}>
+              <div style={{ marginBottom: 10, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1.2 }}>
+                Quality Metrics
+              </div>
+              <div className={styles.metricsGrid}>
+                <div className={styles.metricCard}>
+                  <div className={styles.metricLabel}>SI-SDRi (est)</div>
+                  <div className={`${styles.metricValue} accent`}>
+                    {metrics.si_sdr_improvement_db?.toFixed?.(2) ?? '—'} dB
+                  </div>
+                </div>
+                <div className={styles.metricCard}>
+                  <div className={styles.metricLabel}>Target similarity</div>
+                  <div className={`${styles.metricValue} success`}>
+                    {metrics.target_similarity?.toFixed?.(3) ?? '—'}
+                  </div>
+                </div>
+                <div className={styles.metricCard}>
+                  <div className={styles.metricLabel}>Confidence margin</div>
+                  <div className={styles.metricValue}>
+                    {metrics.confidence_margin?.toFixed?.(3) ?? '—'}
+                  </div>
+                </div>
+                <div className={styles.metricCard}>
+                  <div className={styles.metricLabel}>Voice activity</div>
+                  <div className={`${styles.metricValue} secondary`}>
+                    {metrics.voice_activity_ratio
+                      ? (metrics.voice_activity_ratio * 100).toFixed(0) + '%'
+                      : '—'}
+                  </div>
+                </div>
+                <div className={styles.metricCard}>
+                  <div className={styles.metricLabel}>ICR iterations</div>
+                  <div className={styles.metricValue}>
+                    {metrics.icr_iterations ?? 0}
+                  </div>
+                </div>
+                <div className={styles.metricCard}>
+                  <div className={styles.metricLabel}>Energy ratio (target)</div>
+                  <div className={`${styles.metricValue} accent`}>
+                    {metrics.energy_ratio_target
+                      ? (metrics.energy_ratio_target * 100).toFixed(1) + '%'
+                      : '—'}
+                  </div>
+                </div>
+              </div>
+
+              {metrics.icr_trace?.length > 1 && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4 }}>
+                    ICR convergence (α_target across iterations)
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 50 }}>
+                    {metrics.icr_trace.map((step, i) => {
+                      const alpha = step.alphas?.[0] ?? 0;
+                      const heightPct = Math.max(2, Math.min(100, ((alpha + 1) / 2) * 100));
+                      return (
+                        <div key={i} style={{ flex: 1, textAlign: 'center' }}>
+                          <div style={{
+                            height: `${heightPct}%`,
+                            background: 'linear-gradient(to top, #22c55e, #a855f7)',
+                            borderRadius: 4,
+                            marginBottom: 4,
+                          }} />
+                          <div style={{ fontSize: 10, color: '#888' }}>
+                            {alpha.toFixed(2)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
